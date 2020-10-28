@@ -19,7 +19,10 @@
 package org.apache.flink.streaming.runtime.streamstatus;
 
 import org.apache.flink.streaming.api.watermark.Watermark;
+import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput;
+import org.apache.flink.streaming.runtime.streamrecord.LatencyMarker;
 import org.apache.flink.streaming.runtime.streamrecord.StreamElement;
+import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import org.junit.Test;
 
@@ -49,14 +52,14 @@ public class StatusWatermarkValveTest {
 	 */
 	@Test
 	public void testSingleInputIncreasingWatermarks() throws Exception {
-		BufferedValveOutputHandler valveOutput = new BufferedValveOutputHandler();
-		StatusWatermarkValve valve = new StatusWatermarkValve(1, valveOutput);
+		StatusWatermarkOutput valveOutput = new StatusWatermarkOutput();
+		StatusWatermarkValve valve = new StatusWatermarkValve(1);
 
-		valve.inputWatermark(new Watermark(0), 0);
+		valve.inputWatermark(new Watermark(0), 0, valveOutput);
 		assertEquals(new Watermark(0), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputWatermark(new Watermark(25), 0);
+		valve.inputWatermark(new Watermark(25), 0, valveOutput);
 		assertEquals(new Watermark(25), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 	}
@@ -66,16 +69,16 @@ public class StatusWatermarkValveTest {
 	 */
 	@Test
 	public void testSingleInputDecreasingWatermarksYieldsNoOutput() throws Exception {
-		BufferedValveOutputHandler valveOutput = new BufferedValveOutputHandler();
-		StatusWatermarkValve valve = new StatusWatermarkValve(1, valveOutput);
+		StatusWatermarkOutput valveOutput = new StatusWatermarkOutput();
+		StatusWatermarkValve valve = new StatusWatermarkValve(1);
 
-		valve.inputWatermark(new Watermark(25), 0);
+		valve.inputWatermark(new Watermark(25), 0, valveOutput);
 		assertEquals(new Watermark(25), valveOutput.popLastSeenOutput());
 
-		valve.inputWatermark(new Watermark(18), 0);
+		valve.inputWatermark(new Watermark(18), 0, valveOutput);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputWatermark(new Watermark(42), 0);
+		valve.inputWatermark(new Watermark(42), 0, valveOutput);
 		assertEquals(new Watermark(42), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 	}
@@ -86,20 +89,20 @@ public class StatusWatermarkValveTest {
 	 */
 	@Test
 	public void testSingleInputStreamStatusToggling() throws Exception {
-		BufferedValveOutputHandler valveOutput = new BufferedValveOutputHandler();
-		StatusWatermarkValve valve = new StatusWatermarkValve(1, valveOutput);
+		StatusWatermarkOutput valveOutput = new StatusWatermarkOutput();
+		StatusWatermarkValve valve = new StatusWatermarkValve(1);
 
-		valve.inputStreamStatus(StreamStatus.ACTIVE, 0);
+		valve.inputStreamStatus(StreamStatus.ACTIVE, 0, valveOutput);
 		// this also implicitly verifies that input channels start as ACTIVE
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputStreamStatus(StreamStatus.IDLE, 0);
+		valve.inputStreamStatus(StreamStatus.IDLE, 0, valveOutput);
 		assertEquals(StreamStatus.IDLE, valveOutput.popLastSeenOutput());
 
-		valve.inputStreamStatus(StreamStatus.IDLE, 0);
+		valve.inputStreamStatus(StreamStatus.IDLE, 0, valveOutput);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputStreamStatus(StreamStatus.ACTIVE, 0);
+		valve.inputStreamStatus(StreamStatus.ACTIVE, 0, valveOutput);
 		assertEquals(StreamStatus.ACTIVE, valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 	}
@@ -109,25 +112,25 @@ public class StatusWatermarkValveTest {
 	 */
 	@Test
 	public void testSingleInputWatermarksIntactDuringIdleness() throws Exception {
-		BufferedValveOutputHandler valveOutput = new BufferedValveOutputHandler();
-		StatusWatermarkValve valve = new StatusWatermarkValve(1, valveOutput);
+		StatusWatermarkOutput valveOutput = new StatusWatermarkOutput();
+		StatusWatermarkValve valve = new StatusWatermarkValve(1);
 
-		valve.inputWatermark(new Watermark(25), 0);
+		valve.inputWatermark(new Watermark(25), 0, valveOutput);
 		assertEquals(new Watermark(25), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputStreamStatus(StreamStatus.IDLE, 0);
+		valve.inputStreamStatus(StreamStatus.IDLE, 0, valveOutput);
 		assertEquals(StreamStatus.IDLE, valveOutput.popLastSeenOutput());
 
-		valve.inputWatermark(new Watermark(50), 0);
+		valve.inputWatermark(new Watermark(50), 0, valveOutput);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 		assertEquals(25, valve.getInputChannelStatus(0).watermark);
 
-		valve.inputStreamStatus(StreamStatus.ACTIVE, 0);
+		valve.inputStreamStatus(StreamStatus.ACTIVE, 0, valveOutput);
 		assertEquals(StreamStatus.ACTIVE, valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputWatermark(new Watermark(50), 0);
+		valve.inputWatermark(new Watermark(50), 0, valveOutput);
 		assertEquals(new Watermark(50), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 	}
@@ -137,15 +140,15 @@ public class StatusWatermarkValveTest {
 	 */
 	@Test
 	public void testMultipleInputYieldsWatermarkOnlyWhenAllChannelsReceivesWatermarks() throws Exception {
-		BufferedValveOutputHandler valveOutput = new BufferedValveOutputHandler();
-		StatusWatermarkValve valve = new StatusWatermarkValve(3, valveOutput);
+		StatusWatermarkOutput valveOutput = new StatusWatermarkOutput();
+		StatusWatermarkValve valve = new StatusWatermarkValve(3);
 
-		valve.inputWatermark(new Watermark(0), 0);
-		valve.inputWatermark(new Watermark(0), 1);
+		valve.inputWatermark(new Watermark(0), 0, valveOutput);
+		valve.inputWatermark(new Watermark(0), 1, valveOutput);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
 		// now, all channels have watermarks
-		valve.inputWatermark(new Watermark(0), 2);
+		valve.inputWatermark(new Watermark(0), 2, valveOutput);
 		assertEquals(new Watermark(0), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 	}
@@ -156,30 +159,30 @@ public class StatusWatermarkValveTest {
 	 */
 	@Test
 	public void testMultipleInputIncreasingWatermarks() throws Exception {
-		BufferedValveOutputHandler valveOutput = new BufferedValveOutputHandler();
-		StatusWatermarkValve valve = new StatusWatermarkValve(3, valveOutput);
+		StatusWatermarkOutput valveOutput = new StatusWatermarkOutput();
+		StatusWatermarkValve valve = new StatusWatermarkValve(3);
 
-		valve.inputWatermark(new Watermark(0), 0);
-		valve.inputWatermark(new Watermark(0), 1);
-		valve.inputWatermark(new Watermark(0), 2);
+		valve.inputWatermark(new Watermark(0), 0, valveOutput);
+		valve.inputWatermark(new Watermark(0), 1, valveOutput);
+		valve.inputWatermark(new Watermark(0), 2, valveOutput);
 		assertEquals(new Watermark(0), valveOutput.popLastSeenOutput());
 
-		valve.inputWatermark(new Watermark(12), 0);
-		valve.inputWatermark(new Watermark(8), 2);
-		valve.inputWatermark(new Watermark(10), 2);
+		valve.inputWatermark(new Watermark(12), 0, valveOutput);
+		valve.inputWatermark(new Watermark(8), 2, valveOutput);
+		valve.inputWatermark(new Watermark(10), 2, valveOutput);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputWatermark(new Watermark(15), 1);
+		valve.inputWatermark(new Watermark(15), 1, valveOutput);
 		// lowest watermark across all channels is now channel 2, with watermark @ 10
 		assertEquals(new Watermark(10), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputWatermark(new Watermark(17), 2);
+		valve.inputWatermark(new Watermark(17), 2, valveOutput);
 		// lowest watermark across all channels is now channel 0, with watermark @ 12
 		assertEquals(new Watermark(12), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputWatermark(new Watermark(20), 0);
+		valve.inputWatermark(new Watermark(20), 0, valveOutput);
 		// lowest watermark across all channels is now channel 1, with watermark @ 15
 		assertEquals(new Watermark(15), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
@@ -190,17 +193,17 @@ public class StatusWatermarkValveTest {
 	 */
 	@Test
 	public void testMultipleInputDecreasingWatermarksYieldsNoOutput() throws Exception {
-		BufferedValveOutputHandler valveOutput = new BufferedValveOutputHandler();
-		StatusWatermarkValve valve = new StatusWatermarkValve(3, valveOutput);
+		StatusWatermarkOutput valveOutput = new StatusWatermarkOutput();
+		StatusWatermarkValve valve = new StatusWatermarkValve(3);
 
-		valve.inputWatermark(new Watermark(25), 0);
-		valve.inputWatermark(new Watermark(10), 1);
-		valve.inputWatermark(new Watermark(17), 2);
+		valve.inputWatermark(new Watermark(25), 0, valveOutput);
+		valve.inputWatermark(new Watermark(10), 1, valveOutput);
+		valve.inputWatermark(new Watermark(17), 2, valveOutput);
 		assertEquals(new Watermark(10), valveOutput.popLastSeenOutput());
 
-		valve.inputWatermark(new Watermark(12), 0);
-		valve.inputWatermark(new Watermark(8), 1);
-		valve.inputWatermark(new Watermark(15), 2);
+		valve.inputWatermark(new Watermark(12), 0, valveOutput);
+		valve.inputWatermark(new Watermark(8), 1, valveOutput);
+		valve.inputWatermark(new Watermark(15), 2, valveOutput);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 	}
 
@@ -210,30 +213,30 @@ public class StatusWatermarkValveTest {
 	 */
 	@Test
 	public void testMultipleInputStreamStatusToggling() throws Exception {
-		BufferedValveOutputHandler valveOutput = new BufferedValveOutputHandler();
-		StatusWatermarkValve valve = new StatusWatermarkValve(2, valveOutput);
+		StatusWatermarkOutput valveOutput = new StatusWatermarkOutput();
+		StatusWatermarkValve valve = new StatusWatermarkValve(2);
 
 		// this also implicitly verifies that all input channels start as active
-		valve.inputStreamStatus(StreamStatus.ACTIVE, 0);
-		valve.inputStreamStatus(StreamStatus.ACTIVE, 1);
+		valve.inputStreamStatus(StreamStatus.ACTIVE, 0, valveOutput);
+		valve.inputStreamStatus(StreamStatus.ACTIVE, 1, valveOutput);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputStreamStatus(StreamStatus.IDLE, 1);
+		valve.inputStreamStatus(StreamStatus.IDLE, 1, valveOutput);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
 		// now, all channels are IDLE
-		valve.inputStreamStatus(StreamStatus.IDLE, 0);
+		valve.inputStreamStatus(StreamStatus.IDLE, 0, valveOutput);
 		assertEquals(StreamStatus.IDLE, valveOutput.popLastSeenOutput());
 
-		valve.inputStreamStatus(StreamStatus.IDLE, 0);
-		valve.inputStreamStatus(StreamStatus.IDLE, 1);
+		valve.inputStreamStatus(StreamStatus.IDLE, 0, valveOutput);
+		valve.inputStreamStatus(StreamStatus.IDLE, 1, valveOutput);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
 		// as soon as at least one input becomes active again, the ACTIVE marker should be forwarded
-		valve.inputStreamStatus(StreamStatus.ACTIVE, 1);
+		valve.inputStreamStatus(StreamStatus.ACTIVE, 1, valveOutput);
 		assertEquals(StreamStatus.ACTIVE, valveOutput.popLastSeenOutput());
 
-		valve.inputStreamStatus(StreamStatus.ACTIVE, 0);
+		valve.inputStreamStatus(StreamStatus.ACTIVE, 0, valveOutput);
 		// already back to ACTIVE, should yield no output
 		assertEquals(null, valveOutput.popLastSeenOutput());
 	}
@@ -244,24 +247,24 @@ public class StatusWatermarkValveTest {
 	 */
 	@Test
 	public void testMultipleInputWatermarkAdvancingWithPartiallyIdleChannels() throws Exception {
-		BufferedValveOutputHandler valveOutput = new BufferedValveOutputHandler();
-		StatusWatermarkValve valve = new StatusWatermarkValve(3, valveOutput);
+		StatusWatermarkOutput valveOutput = new StatusWatermarkOutput();
+		StatusWatermarkValve valve = new StatusWatermarkValve(3);
 
-		valve.inputWatermark(new Watermark(15), 0);
-		valve.inputWatermark(new Watermark(10), 1);
+		valve.inputWatermark(new Watermark(15), 0, valveOutput);
+		valve.inputWatermark(new Watermark(10), 1, valveOutput);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputStreamStatus(StreamStatus.IDLE, 2);
+		valve.inputStreamStatus(StreamStatus.IDLE, 2, valveOutput);
 		// min watermark should be computed from remaining ACTIVE channels
 		assertEquals(new Watermark(10), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputWatermark(new Watermark(18), 1);
+		valve.inputWatermark(new Watermark(18), 1, valveOutput);
 		// now, min watermark should be 15 from channel #0
 		assertEquals(new Watermark(15), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputWatermark(new Watermark(20), 0);
+		valve.inputWatermark(new Watermark(20), 0, valveOutput);
 		// now, min watermark should be 18 from channel #1
 		assertEquals(new Watermark(18), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
@@ -273,19 +276,19 @@ public class StatusWatermarkValveTest {
 	 */
 	@Test
 	public void testMultipleInputWatermarkAdvancingAsChannelsIndividuallyBecomeIdle() throws Exception {
-		BufferedValveOutputHandler valveOutput = new BufferedValveOutputHandler();
-		StatusWatermarkValve valve = new StatusWatermarkValve(3, valveOutput);
+		StatusWatermarkOutput valveOutput = new StatusWatermarkOutput();
+		StatusWatermarkValve valve = new StatusWatermarkValve(3);
 
-		valve.inputWatermark(new Watermark(25), 0);
-		valve.inputWatermark(new Watermark(10), 1);
-		valve.inputWatermark(new Watermark(17), 2);
+		valve.inputWatermark(new Watermark(25), 0, valveOutput);
+		valve.inputWatermark(new Watermark(10), 1, valveOutput);
+		valve.inputWatermark(new Watermark(17), 2, valveOutput);
 		assertEquals(new Watermark(10), valveOutput.popLastSeenOutput());
 
-		valve.inputStreamStatus(StreamStatus.IDLE, 1);
+		valve.inputStreamStatus(StreamStatus.IDLE, 1, valveOutput);
 		// only channel 0 & 2 is ACTIVE; 17 is the overall min watermark now
 		assertEquals(new Watermark(17), valveOutput.popLastSeenOutput());
 
-		valve.inputStreamStatus(StreamStatus.IDLE, 2);
+		valve.inputStreamStatus(StreamStatus.IDLE, 2, valveOutput);
 		// only channel 0 is ACTIVE; 25 is the overall min watermark now
 		assertEquals(new Watermark(25), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
@@ -301,8 +304,8 @@ public class StatusWatermarkValveTest {
 	 */
 	@Test
 	public void testMultipleInputFlushMaxWatermarkAndStreamStatusOnceAllInputsBecomeIdle() throws Exception {
-		BufferedValveOutputHandler valveOutput = new BufferedValveOutputHandler();
-		StatusWatermarkValve valve = new StatusWatermarkValve(3, valveOutput);
+		StatusWatermarkOutput valveOutput = new StatusWatermarkOutput();
+		StatusWatermarkValve valve = new StatusWatermarkValve(3);
 
 		// -------------------------------------------------------------------------------------------
 		// Setup valve for test case:
@@ -312,9 +315,9 @@ public class StatusWatermarkValveTest {
 		//  Min Watermark across channels = 3 (from channel #3)
 		// -------------------------------------------------------------------------------------------
 
-		valve.inputWatermark(new Watermark(10), 0);
-		valve.inputWatermark(new Watermark(5), 1);
-		valve.inputWatermark(new Watermark(3), 2);
+		valve.inputWatermark(new Watermark(10), 0, valveOutput);
+		valve.inputWatermark(new Watermark(5), 1, valveOutput);
+		valve.inputWatermark(new Watermark(3), 2, valveOutput);
 		assertEquals(new Watermark(3), valveOutput.popLastSeenOutput());
 
 		// -------------------------------------------------------------------------------------------
@@ -323,11 +326,11 @@ public class StatusWatermarkValveTest {
 		//   |-> (nothing emitted)        |-> (nothing emitted)        |-> Emit Watermark(10) & IDLE
 		// -------------------------------------------------------------------------------------------
 
-		valve.inputStreamStatus(StreamStatus.IDLE, 0);
-		valve.inputStreamStatus(StreamStatus.IDLE, 1);
+		valve.inputStreamStatus(StreamStatus.IDLE, 0, valveOutput);
+		valve.inputStreamStatus(StreamStatus.IDLE, 1, valveOutput);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputStreamStatus(StreamStatus.IDLE, 2);
+		valve.inputStreamStatus(StreamStatus.IDLE, 2, valveOutput);
 		assertEquals(new Watermark(10), valveOutput.popLastSeenOutput());
 		assertEquals(StreamStatus.IDLE, valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
@@ -339,36 +342,36 @@ public class StatusWatermarkValveTest {
 	 */
 	@Test
 	public void testMultipleInputWatermarkRealignmentAfterResumeActive() throws Exception {
-		BufferedValveOutputHandler valveOutput = new BufferedValveOutputHandler();
-		StatusWatermarkValve valve = new StatusWatermarkValve(3, valveOutput);
+		StatusWatermarkOutput valveOutput = new StatusWatermarkOutput();
+		StatusWatermarkValve valve = new StatusWatermarkValve(3);
 
-		valve.inputWatermark(new Watermark(10), 0);
-		valve.inputWatermark(new Watermark(7), 1);
-		valve.inputWatermark(new Watermark(3), 2);
+		valve.inputWatermark(new Watermark(10), 0, valveOutput);
+		valve.inputWatermark(new Watermark(7), 1, valveOutput);
+		valve.inputWatermark(new Watermark(3), 2, valveOutput);
 		assertEquals(new Watermark(3), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
-		valve.inputStreamStatus(StreamStatus.IDLE, 2);
+		valve.inputStreamStatus(StreamStatus.IDLE, 2, valveOutput);
 		assertEquals(new Watermark(7), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
 		// let channel 2 become active again; since the min watermark has now advanced to 7,
 		// channel 2 should have been marked as non-aligned.
-		valve.inputStreamStatus(StreamStatus.ACTIVE, 2);
+		valve.inputStreamStatus(StreamStatus.ACTIVE, 2, valveOutput);
 		assertFalse(valve.getInputChannelStatus(2).isWatermarkAligned);
 
 		// during the realignment process, watermarks should still be accepted by channel 2 (but shouldn't yield new watermarks)
-		valve.inputWatermark(new Watermark(5), 2);
+		valve.inputWatermark(new Watermark(5), 2, valveOutput);
 		assertEquals(5, valve.getInputChannelStatus(2).watermark);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
 		// let channel 2 catch up with the min watermark; now should be realigned
-		valve.inputWatermark(new Watermark(9), 2);
+		valve.inputWatermark(new Watermark(9), 2, valveOutput);
 		assertTrue(valve.getInputChannelStatus(2).isWatermarkAligned);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
 		// check that realigned inputs is now taken into account for watermark advancement
-		valve.inputWatermark(new Watermark(12), 1);
+		valve.inputWatermark(new Watermark(12), 1, valveOutput);
 		assertEquals(new Watermark(9), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 	}
@@ -380,45 +383,55 @@ public class StatusWatermarkValveTest {
 	 */
 	@Test
 	public void testNoOutputWhenAllActiveChannelsAreUnaligned() throws Exception {
-		BufferedValveOutputHandler valveOutput = new BufferedValveOutputHandler();
-		StatusWatermarkValve valve = new StatusWatermarkValve(3, valveOutput);
+		StatusWatermarkOutput valveOutput = new StatusWatermarkOutput();
+		StatusWatermarkValve valve = new StatusWatermarkValve(3);
 
-		valve.inputWatermark(new Watermark(10), 0);
-		valve.inputWatermark(new Watermark(7), 1);
+		valve.inputWatermark(new Watermark(10), 0, valveOutput);
+		valve.inputWatermark(new Watermark(7), 1, valveOutput);
 
 		// make channel 2 ACTIVE, it is now in "catch up" mode (unaligned watermark)
-		valve.inputStreamStatus(StreamStatus.IDLE, 2);
+		valve.inputStreamStatus(StreamStatus.IDLE, 2, valveOutput);
 		assertEquals(new Watermark(7), valveOutput.popLastSeenOutput());
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
 		// make channel 2 ACTIVE again, it is still unaligned
-		valve.inputStreamStatus(StreamStatus.ACTIVE, 2);
+		valve.inputStreamStatus(StreamStatus.ACTIVE, 2, valveOutput);
 		assertEquals(null, valveOutput.popLastSeenOutput());
 
 		// make channel 0 and 1 IDLE, now channel 2 is the only ACTIVE channel but it's unaligned
-		valve.inputStreamStatus(StreamStatus.IDLE, 0);
-		valve.inputStreamStatus(StreamStatus.IDLE, 1);
+		valve.inputStreamStatus(StreamStatus.IDLE, 0, valveOutput);
+		valve.inputStreamStatus(StreamStatus.IDLE, 1, valveOutput);
 
 		// we should not see any output
 		assertEquals(null, valveOutput.popLastSeenOutput());
 	}
 
-	private class BufferedValveOutputHandler implements StatusWatermarkValve.ValveOutputHandler {
+	private static class StatusWatermarkOutput implements PushingAsyncDataInput.DataOutput {
+
 		private BlockingQueue<StreamElement> allOutputs = new LinkedBlockingQueue<>();
 
 		@Override
-		public void handleWatermark(Watermark watermark) {
+		public void emitWatermark(Watermark watermark) {
 			allOutputs.add(watermark);
 		}
 
 		@Override
-		public void handleStreamStatus(StreamStatus streamStatus) {
+		public void emitStreamStatus(StreamStatus streamStatus) {
 			allOutputs.add(streamStatus);
+		}
+
+		@Override
+		public void emitRecord(StreamRecord record) {
+			throw new UnsupportedOperationException();
+		}
+
+		@Override
+		public void emitLatencyMarker(LatencyMarker latencyMarker) {
+			throw new UnsupportedOperationException();
 		}
 
 		public StreamElement popLastSeenOutput() {
 			return allOutputs.poll();
 		}
 	}
-
 }

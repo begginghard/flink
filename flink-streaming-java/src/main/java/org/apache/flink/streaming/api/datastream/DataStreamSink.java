@@ -23,8 +23,7 @@ import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.operators.ResourceSpec;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.StreamSink;
-import org.apache.flink.streaming.api.transformations.SinkTransformation;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.streaming.api.transformations.LegacySinkTransformation;
 
 /**
  * A Stream Sink. This is used for emitting elements from a streaming topology.
@@ -34,18 +33,18 @@ import org.apache.flink.util.Preconditions;
 @Public
 public class DataStreamSink<T> {
 
-	private final SinkTransformation<T> transformation;
+	private final LegacySinkTransformation<T> transformation;
 
 	@SuppressWarnings("unchecked")
 	protected DataStreamSink(DataStream<T> inputStream, StreamSink<T> operator) {
-		this.transformation = new SinkTransformation<T>(inputStream.getTransformation(), "Unnamed", operator, inputStream.getExecutionEnvironment().getParallelism());
+		this.transformation = new LegacySinkTransformation<T>(inputStream.getTransformation(), "Unnamed", operator, inputStream.getExecutionEnvironment().getParallelism());
 	}
 
 	/**
 	 * Returns the transformation that contains the actual sink operator of this sink.
 	 */
 	@Internal
-	public SinkTransformation<T> getTransformation() {
+	public LegacySinkTransformation<T> getTransformation() {
 		return transformation;
 	}
 
@@ -127,11 +126,6 @@ public class DataStreamSink<T> {
 	 * @return The sink with set minimum and preferred resources.
 	 */
 	private DataStreamSink<T> setResources(ResourceSpec minResources, ResourceSpec preferredResources) {
-		Preconditions.checkNotNull(minResources, "The min resources must be not null.");
-		Preconditions.checkNotNull(preferredResources, "The preferred resources must be not null.");
-		Preconditions.checkArgument(minResources.isValid() && preferredResources.isValid() && minResources.lessThanOrEqual(preferredResources),
-				"The values in resources must be not less than 0 and the preferred resources must be greater than the min resources.");
-
 		transformation.setResources(minResources, preferredResources);
 
 		return this;
@@ -144,9 +138,6 @@ public class DataStreamSink<T> {
 	 * @return The sink with set minimum and preferred resources.
 	 */
 	private DataStreamSink<T> setResources(ResourceSpec resources) {
-		Preconditions.checkNotNull(resources, "The resources must be not null.");
-		Preconditions.checkArgument(resources.isValid(), "The values in resources must be not less than 0.");
-
 		transformation.setResources(resources, resources);
 
 		return this;

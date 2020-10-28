@@ -45,13 +45,13 @@ import org.apache.flink.runtime.rest.messages.JobIdsWithStatusesOverviewHeaders;
 import org.apache.flink.runtime.rest.messages.JobMessageParameters;
 import org.apache.flink.runtime.rest.messages.JobVertexDetailsHeaders;
 import org.apache.flink.runtime.rest.messages.JobVertexDetailsInfo;
-import org.apache.flink.runtime.rest.messages.JobVertexDetailsInfo.VertexTaskDetail;
 import org.apache.flink.runtime.rest.messages.JobVertexMessageParameters;
 import org.apache.flink.runtime.rest.messages.MessageHeaders;
 import org.apache.flink.runtime.rest.messages.MessageParameters;
 import org.apache.flink.runtime.rest.messages.ResponseBody;
 import org.apache.flink.runtime.rest.messages.job.JobDetailsHeaders;
 import org.apache.flink.runtime.rest.messages.job.JobDetailsInfo;
+import org.apache.flink.runtime.rest.messages.job.SubtaskExecutionAttemptDetailsInfo;
 import org.apache.flink.runtime.util.ExecutorThreadFactory;
 import org.apache.flink.test.util.TestEnvironment;
 import org.apache.flink.util.Collector;
@@ -59,6 +59,7 @@ import org.apache.flink.util.ConfigurationException;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.FlinkRuntimeException;
+import org.apache.flink.util.TemporaryClassLoaderContext;
 import org.apache.flink.util.TestLogger;
 
 import org.junit.After;
@@ -91,7 +92,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 
-import static org.apache.flink.runtime.executiongraph.failover.FailoverStrategyLoader.PIPELINED_REGION_RESTART_STRATEGY_NAME;
+import static org.apache.flink.runtime.executiongraph.failover.flip1.FailoverStrategyFactoryLoader.PIPELINED_REGION_RESTART_STRATEGY_NAME;
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertThat;
 
@@ -393,14 +394,16 @@ public class BatchFineGrainedRecoveryITCase extends TestLogger {
 		@Override
 		void fail(int trackingIndex) throws Exception {
 			//noinspection OverlyBroadCatchBlock
-			try {
-				restartTaskManager();
-			} catch (InterruptedException e) {
-				// ignore the exception, task should have been failed while stopping TM
-				Thread.currentThread().interrupt();
-			} catch (Throwable t) {
-				failureTracker.unrelatedFailure(t);
-				throw t;
+			try (TemporaryClassLoaderContext unused = TemporaryClassLoaderContext.of(ClassLoader.getSystemClassLoader())) {
+				try {
+					restartTaskManager();
+				} catch (InterruptedException e) {
+					// ignore the exception, task should have been failed while stopping TM
+					Thread.currentThread().interrupt();
+				} catch (Throwable t) {
+					failureTracker.unrelatedFailure(t);
+					throw t;
+				}
 			}
 		}
 	}
@@ -604,7 +607,7 @@ public class BatchFineGrainedRecoveryITCase extends TestLogger {
 		private final String name;
 		private final int attempt;
 
-		private InternalTaskInfo(String name, VertexTaskDetail vertexTaskDetail) {
+		private InternalTaskInfo(String name, SubtaskExecutionAttemptDetailsInfo vertexTaskDetail) {
 			this.name = name;
 			this.attempt = vertexTaskDetail.getAttempt();
 		}

@@ -115,7 +115,7 @@ final class BoundedBlockingSubpartition extends ResultSubpartition {
 	}
 
 	@Override
-	public boolean add(BufferConsumer bufferConsumer) throws IOException {
+	public boolean add(BufferConsumer bufferConsumer, int partialRecordLength) throws IOException {
 		if (isFinished()) {
 			bufferConsumer.close();
 			return false;
@@ -149,7 +149,15 @@ final class BoundedBlockingSubpartition extends ResultSubpartition {
 		try {
 			final Buffer buffer = bufferConsumer.build();
 			try {
-				data.writeBuffer(buffer);
+				if (canBeCompressed(buffer)) {
+					final Buffer compressedBuffer = parent.bufferCompressor.compressToIntermediateBuffer(buffer);
+					data.writeBuffer(compressedBuffer);
+					if (compressedBuffer != buffer) {
+						compressedBuffer.recycleBuffer();
+					}
+				} else {
+					data.writeBuffer(buffer);
+				}
 
 				numBuffersAndEventsWritten++;
 				if (buffer.isBuffer()) {
@@ -172,7 +180,7 @@ final class BoundedBlockingSubpartition extends ResultSubpartition {
 
 		isFinished = true;
 		flushCurrentBuffer();
-		writeAndCloseBufferConsumer(EventSerializer.toBufferConsumer(EndOfPartitionEvent.INSTANCE));
+		writeAndCloseBufferConsumer(EventSerializer.toBufferConsumer(EndOfPartitionEvent.INSTANCE, false));
 		data.finishWrite();
 	}
 
@@ -195,8 +203,6 @@ final class BoundedBlockingSubpartition extends ResultSubpartition {
 		synchronized (lock) {
 			checkState(!isReleased, "data partition already released");
 			checkState(isFinished, "writing of blocking partition not yet finished");
-
-			availability.notifyDataAvailable();
 
 			final BoundedBlockingSubpartitionReader reader = new BoundedBlockingSubpartitionReader(
 					this, data, numDataBuffersWritten, availability);
@@ -226,13 +232,6 @@ final class BoundedBlockingSubpartition extends ResultSubpartition {
 		if (readers.isEmpty()) {
 			data.close();
 		}
-	}
-
-	// ------------------------------ legacy ----------------------------------
-
-	@Override
-	public int releaseMemory() throws IOException {
-		return 0;
 	}
 
 	// ---------------------------- statistics --------------------------------
